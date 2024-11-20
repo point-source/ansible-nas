@@ -38,6 +38,16 @@
     content: "{{ docker_daemon_json | to_nice_json }}"
   register: docker_config
 
+- name: Create Docker networks
+  community.docker.docker_network:
+    name: "{{ item.key }}"
+    driver: "{{ item.value.driver }}"
+    driver_options: "{{ item.value.driver_options | default(omit) }}"
+    ipam_config: "{{ item.value.ipam_config | default(omit) }}"
+    state: "{{ 'present' if item.value.enabled | default(false) else 'absent' }}"
+  loop: "{{ docker_networks | dict2items }}"
+  when: docker_networks is defined
+
 - name: Restart Docker # noqa no-handler
   ansible.builtin.service:
     name: docker
