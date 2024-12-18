@@ -49,7 +49,6 @@
       tags:
         - logging
 
-
     ###
     ### Applications
     ###
@@ -324,6 +323,10 @@
     - role: plex
       tags:
         - plex
+
+    - role: portainer_agent
+      tags:
+        - portainer_agent
 
     - role: portainer
       tags:

@@ -1,0 +1,14 @@
+---
+portainer_agent_enabled: false
+
+# directories
+portainer_agent_data_directory: "{{ docker_home }}/portainer_agent"
+
+# network
+portainer_agent_port: "9001"
+
+# specs
+portainer_agent_memory: 256m
+
+# docker
+portainer_agent_container_name: portainer_agent
