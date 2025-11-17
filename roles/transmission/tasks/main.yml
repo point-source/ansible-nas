@@ -1,51 +1,103 @@
 ---
-- name: Start Transmission
+- name: Start Transmission Instances
   block:
-    - name: Create Transmission Directories
+    - name: Debug transmission instances
+      ansible.builtin.debug:
+        var: transmission_instances
+
+    - name: Process transmission instances with modified paths
+      ansible.builtin.set_fact:
+        processed_transmission_instances: >-
+          {{
+            (processed_transmission_instances | default([])) +
+            [item | combine({
+              'name': transmission_defaults.name_prefix + '_' + (item.name | default('')),
+              'config_directory': item.config_directory | default([transmission_defaults.config_directory_base, item.name] | path_join, true),
+              'download_directory': item.download_directory | default([transmission_defaults.download_directory_base, item.name] | path_join, true),
+              'watch_directory': item.watch_directory | default([transmission_defaults.watch_directory_base, item.name] | path_join, true),
+              'webui_port': item.webui_port | default(transmission_defaults.webui_port_start | int + index),
+              'external_port': item.external_port | default(transmission_defaults.external_port_start | int + index),
+              'hostname': item.hostname | default(transmission_defaults.hostname_prefix + '_' + item.name)
+            })]
+          }}
+      loop: "{{ transmission_instances }}"
+      loop_control:
+        index_var: index
+        label: "Processing {{ item.name }}"
+
+    - name: Debug processed transmission instances
+      ansible.builtin.debug:
+        var: processed_transmission_instances
+
+    - name: Create list of all transmission paths
+      ansible.builtin.set_fact:
+        transmission_paths: >-
+          {{
+            (processed_transmission_instances | map(attribute='config_directory') | list) +
+            (processed_transmission_instances | map(attribute='download_directory') | list) +
+            (processed_transmission_instances | map(attribute='watch_directory') | list)
+          }}
+
+    - name: Create Transmission Directories for Each Instance
       ansible.builtin.file:
         path: "{{ item }}"
         state: directory
-        # mode: 0755
-      with_items:
-        - "{{ transmission_config_directory }}"
-        - "{{ transmission_download_directory }}"
-        - "{{ transmission_watch_directory }}"
+      loop: "{{ transmission_paths }}"
+      when: item.enabled | default(true)
 
-    - name: Transmission Docker Container
+    - name: Transmission Docker Containers
       community.docker.docker_container:
-        name: "{{ transmission_container_name }}"
-        image: "{{ transmission_image_name }}:{{ transmission_image_version }}"
+        name: "{{ item.name }}"
+        hostname: "{{ item.hostname }}"
+        image: "{{ item.image_name | default(transmission_defaults.image_name) }}:{{ item.image_version | default(transmission_defaults.image_version) }}"
         pull: true
         comparisons:
           networks: strict
         volumes:
-          - "{{ transmission_config_directory }}:/config:rw"
-          - "{{ transmission_download_directory }}:/downloads:rw"
-          - "{{ transmission_watch_directory }}:/watch:rw"
+          - "{{ item.config_directory }}:/config:rw"
+          - "{{ item.download_directory }}:/downloads:rw"
+          - "{{ item.watch_directory }}:/watch:rw"
         ports:
-          - "{{ transmission_webui_port }}:9091"
-          - "{{ transmission_external_port }}:51413"
-          - "{{ transmission_external_port }}:51413/udp"
+          - "{{ item.webui_port }}:9091"
+          - "{{ item.external_port }}:51413"
+          - "{{ item.external_port }}:51413/udp"
         env:
-          TZ: "{{ transmission_timezone }}"
-          PUID: "{{ transmission_user_id }}"
-          PGID: "{{ transmission_group_id }}"
-        networks: "{{ transmission_networks if transmission_networks is defined else omit }}"
+          TZ: "{{ item.timezone | default(transmission_defaults.timezone) }}"
+          PUID: "{{ (item.user_id | default(transmission_defaults.user_id)) | string }}"
+          PGID: "{{ (item.group_id | default(transmission_defaults.group_id)) | string }}"
+        networks: "{{ item.networks if item.networks is defined else omit }}"
         restart_policy: unless-stopped
-        memory: "{{ transmission_memory }}"
+        memory: "{{ item.memory | default(transmission_defaults.memory) }}"
         labels:
+          ansible_nas_role: "transmission"
           traefik.enable: "{{ transmission_available_externally | string }}"
-          traefik.http.routers.transmission.rule: "Host(`{{ transmission_hostname }}.{{ ansible_nas_domain }}`)"
-          traefik.http.routers.transmission.tls.certresolver: "letsencrypt"
-          traefik.http.routers.transmission.tls.domains[0].main: "{{ ansible_nas_domain }}"
-          traefik.http.routers.transmission.tls.domains[0].sans: "*.{{ ansible_nas_domain }}"
-          traefik.http.services.transmission.loadbalancer.server.port: "9091"
-  when: transmission_enabled is true
+          traefik.http.routers.transmission-{{ item.name }}.rule: "Host(`{{ item.hostname }}.{{ ansible_nas_domain }}`)"
+          traefik.http.routers.transmission-{{ item.name }}.tls.certresolver: "letsencrypt"
+          traefik.http.routers.transmission-{{ item.name }}.tls.domains[0].main: "{{ ansible_nas_domain }}"
+          traefik.http.routers.transmission-{{ item.name }}.tls.domains[0].sans: "*.{{ ansible_nas_domain }}"
+          traefik.http.services.transmission-{{ item.name }}.loadbalancer.server.port: "9091"
+      loop: "{{ processed_transmission_instances }}"
+      when: item.enabled | default(true)
+      register: container_result
+      until: container_result is success
+      retries: 1
+  when: transmission_enabled | bool and transmission_instances | length > 0
 
-- name: Stop Transmission
+- name: Stop Transmission Instances
   block:
-    - name: Stop Transmission
+    - name: Get list of existing transmission containers
+      community.docker.docker_host_info:
+        containers: yes
+        containers_filters:
+          label:
+            - "ansible_nas_role=transmission"
+      register: existing_containers
+
+    - name: Stop Transmission Instances and Remove Obsolete Containers
       community.docker.docker_container:
-        name: "{{ transmission_container_name }}"
+        name: "{{ item.Names[0] | regex_replace('^/') }}"
         state: absent
-  when: transmission_enabled is false
+      loop: "{{ existing_containers.containers }}"
+      when: >
+        (not transmission_enabled | bool) or
+        (item.Names[0] | regex_replace('^/') not in (processed_transmission_instances | default([]) | map(attribute='name') | list))
