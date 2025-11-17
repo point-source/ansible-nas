@@ -1,0 +1,23 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Include vars
+      ansible.builtin.include_vars:
+        file: ../../defaults/main.yml
+    - name: Get container state
+      community.docker.docker_container_info:
+        name: '{{ vaultwarden_container_name }}'
+      register: result
+    - name: Get backup container state
+      community.docker.docker_container_info:
+        name: '{{ vaultwarden_backup_container_name }}'
+      register: result_backup
+    - name: Check Vaultwarden is running
+      ansible.builtin.assert:
+        that:
+          - result.container['State']['Status'] == "running"
+          - result.container['State']['Restarting'] == false
+          - result_backup.container['State']['Status'] == "running"
+          - result_backup.container['State']['Restarting'] == false

@@ -1,0 +1,31 @@
+mqtt:
+  enabled: True
+  host: {{ frigate_mqtt_host }}
+    # Optional: port (default: shown below)
+  port: {{ frigate_mqtt_port }}
+  # Optional: topic prefix (default: shown below)
+  # WARNING: must be unique if you are running multiple instances
+  topic_prefix: {{ frigate_mqtt_topic_prefix }}
+  # Optional: client id (default: shown below)
+  # WARNING: must be unique if you are running multiple instances
+  client_id: {{ frigate_mqtt_client_id }}
+  # Optional: user
+  user: {{ frigate_mqtt_user }}
+  # Optional: password
+  # NOTE: Environment variables that begin with 'FRIGATE_' may be referenced in {}.
+  #       eg. password: '{FRIGATE_MQTT_PASSWORD}'
+  password: {{ frigate_mqtt_password}}
+  # Optional: interval in seconds for publishing stats (default: shown below)
+  stats_interval: 60
+
+cameras:
+  test:
+    ffmpeg:
+      inputs:
+        - path: http://192.168.2.46/flv?port=1935&app=bcs&stream=channel0_main.bcs&user={{ frigate_camera_username }}&password={{ frigate_camera_password }}
+          roles:
+            - record
+    detect:
+      height: 1080
+      width: 1920
+      fps: 5

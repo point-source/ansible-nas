@@ -7,8 +7,9 @@ platforms:
   - name: instance
     image: geerlingguy/docker-ubuntu2204-ansible:latest
     volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - /var/run/docker.sock:/var/run/docker.sock
+    cgroupns_mode: host
     privileged: true
     pre_build_image: true
 provisioner:
@@ -35,6 +36,8 @@ provisioner:
   playbooks:
     prepare: ../../../../tests/molecule/resources/playbooks/prepare.yml
     converge: ../../../../tests/molecule/resources/playbooks/converge.yml
+  env:
+    ANSIBLE_ROLES_PATH: ../../../../roles/
 verifier:
   name: ansible
 scenario:

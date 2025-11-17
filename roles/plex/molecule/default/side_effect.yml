@@ -8,3 +8,5 @@
         name: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') | basename }}"
       vars:
         plex_enabled: false
+        plex_autoscan_enabled: false
+        plex_metamanager_enabled: false

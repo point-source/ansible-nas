@@ -5,6 +5,10 @@
       community.docker.docker_container:
         name: "{{ stats_smartctl_container_name }}"
         image: "{{ stats_smartctl_docker_image_name }}:{{ stats_smartctl_docker_image_version }}"
+        networks:
+          - name: "{{ stats_network_name }}"
+        network_mode: "{{ stats_network_name }}"
+        container_default_behavior: no_defaults
         pull: true
         privileged: true
         ports:
@@ -32,6 +36,10 @@
       community.docker.docker_container:
         name: "{{ stats_speedtest_container_name }}"
         image: "{{ stats_speedtest_docker_image_name }}:{{ stats_speedtest_docker_image_version }}"
+        networks:
+          - name: "{{ stats_network_name }}"
+        network_mode: "{{ stats_network_name }}"
+        container_default_behavior: no_defaults
         pull: true
         ports:
           "{{ stats_speedtest_exporter_port }}:9798"

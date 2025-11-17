@@ -1,0 +1,191 @@
+---
+- name: Start Invidious
+  block:
+    - name: Create Invidious Directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+      with_items:
+        - "{{ invidious_data_directory }}"
+        - "{{ invidious_data_directory }}/config"
+        - "{{ invidious_data_directory }}/config/sql"
+
+    - name: Download init-invidious-db.sh
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/iv-org/invidious/master/docker/init-invidious-db.sh
+        dest: "{{ invidious_data_directory }}/config/init-invidious-db.sh"
+        mode: '0775'
+
+    - name: Download sql files
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/iv-org/invidious/master/config/sql/{{ item }}"
+        dest: "{{ invidious_data_directory }}/config/sql/{{ item }}"
+        mode: '0664'
+      with_items:
+        - "annotations.sql"
+        - "channel_videos.sql"
+        - "channels.sql"
+        - "nonces.sql"
+        - "playlist_videos.sql"
+        - "playlists.sql"
+        - "session_ids.sql"
+        - "users.sql"
+        - "videos.sql"
+
+    - name: Create Invidious network
+      community.docker.docker_network:
+        name: "{{ invidious_network_name }}"
+
+    - name: Check if we already have visitor_data and po_token cached
+      ansible.builtin.stat:
+        path: /tmp/visitor_data_po_token_cache.json
+      register: invidious_cache_check
+
+    - name: Run Docker container and capture visitor_data and po_token (if cache not present)
+      community.docker.docker_container:
+        name: youtube-session-generator
+        image: "{{ invidious_docker_youtube_generator_image }}"
+        detach: false
+        cleanup: true
+      register: invidious_container_output
+      when: not invidious_cache_check.stat.exists
+
+    - name: Extract visitor_data and po_token (if cache not present)
+      ansible.builtin.set_fact:
+        invidious_visitor_data: "{{ invidious_container_output.container['Output'] | regex_search('visitor_data: (.+?)\\n', '\\1') | first }}"
+        invidious_po_token: "{{ invidious_container_output.container['Output'] | regex_search('po_token: (.+?)\\n', '\\1') | first }}"
+      when: not invidious_cache_check.stat.exists
+
+    - name: Cache visitor_data and po_token in a file
+      ansible.builtin.copy:
+        content: |
+          {
+            "visitor_data": "{{ invidious_visitor_data }}",
+            "po_token": "{{ invidious_po_token }}"
+          }
+        dest: /tmp/visitor_data_po_token_cache.json
+      when: not invidious_cache_check.stat.exists
+
+    - name: Load cached visitor_data and po_token (if cache exists)
+      ansible.builtin.slurp:
+        src: /tmp/visitor_data_po_token_cache.json
+      register: invidious_cached_data
+      when: invidious_cache_check.stat.exists
+
+    - name: Set facts from cached data
+      ansible.builtin.set_fact:
+        invidious_visitor_data: "{{ invidious_cached_data.content | b64decode | from_json | json_query('visitor_data') }}"
+        invidious_po_token: "{{ invidious_cached_data.content | b64decode | from_json | json_query('po_token') }}"
+      when: invidious_cache_check.stat.exists
+      tags: molecule-idempotence-notest
+
+    # - name: Display captured variables
+    #   ansible.builtin.debug:
+    #     msg:
+    #       - "visitor_data: {{ visitor_data }}"
+    #       - "po_token: {{ po_token }}"
+    #       - "invidious_config: {{ invidious_config }}"
+
+    - name: Create Invidious Postgress Docker Container
+      community.docker.docker_container:
+        name: "{{ invidious_postgres_container_name }}"
+        image: "{{ invidious_postgres_image_name }}:{{ invidious_postgres_image_version }}"
+        pull: true
+        volumes:
+          - "{{ invidious_data_directory }}/database:/var/lib/postgresql/data:rw"
+          - "{{ invidious_data_directory }}/config/sql:/config/sql"
+          - "{{ invidious_data_directory }}/config/init-invidious-db.sh:/docker-entrypoint-initdb.d/init-invidious-db.sh"
+        networks:
+          - name: "{{ invidious_network_name }}"
+        network_mode: "{{ invidious_network_name }}"
+        container_default_behavior: no_defaults
+        env:
+          POSTGRES_PASSWORD: "{{ invidious_db_password }}"
+          POSTGRES_USER: "{{ invidious_db_username }}"
+          POSTGRES_DB: "{{ invidious_db_name }}"
+          PG_DATA: /var/lib/postgresql/data
+        labels:
+          traefik.enable: "false"
+        restart_policy: always
+        memory: "{{ invidious_postgres_memory }}"
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -d {{ invidious_db_name }} -U {{ invidious_db_username }}"]
+          start_period: 20s
+          interval: 30s
+          retries: 5
+          timeout: 5s
+
+    - name: Create Invidious Sig Helper Docker Container
+      community.docker.docker_container:
+        container_default_behavior: no_defaults
+        name: "{{ invidious_sig_helper_container_name }}"
+        image: "{{ invidious_sig_helper_image_name }}:{{ invidious_sig_helper_image_version }}"
+        pull: true
+        networks:
+          - name: "{{ invidious_network_name }}"
+        network_mode: "{{ invidious_network_name }}"
+        command: ["--tcp", "0.0.0.0:12999"]
+        env:
+          RUST_LOG: "{{ invidious_sig_helper_log_level }}"
+        restart_policy: unless-stopped
+        cap_drop:
+          - ALL
+        read_only: true
+        security_opts:
+          - no-new-privileges:true
+        memory: "{{ invidious_sig_helper_memory }}"
+        labels:
+          traefik.enable: "false"
+
+    - name: Create Invidious Docker Container
+      community.docker.docker_container:
+        container_default_behavior: no_defaults
+        name: "{{ invidious_container_name }}"
+        image: "{{ invidious_image_name }}:{{ invidious_image_version }}"
+        pull: true
+        volumes:
+          - "{{ invidious_data_directory }}/data:/data:rw"
+        networks:
+          - name: "{{ invidious_network_name }}"
+        network_mode: "{{ invidious_network_name }}"
+        ports:
+          - "{{ invidious_port }}:3000"
+        env:
+          TZ: "{{ ansible_nas_timezone }}"
+          PUID: "{{ invidious_user_id | quote }}"
+          PGID: "{{ invidious_group_id | quote }}"
+          INVIDIOUS_CONFIG: "{{ invidious_config | replace('dummy_visitor_data', visitor_data) | replace('dummy_po_token', po_token) }}"
+        restart_policy: unless-stopped
+        memory: "{{ invidious_memory }}"
+        labels:
+          traefik.enable: "{{ invidious_available_externally | string }}"
+          traefik.http.routers.invidious.rule: "Host(`{{ invidious_hostname }}.{{ ansible_nas_domain }}`)"
+          traefik.http.routers.invidious.tls.certresolver: "letsencrypt"
+          traefik.http.routers.invidious.tls.domains[0].main: "{{ ansible_nas_domain }}"
+          traefik.http.routers.invidious.tls.domains[0].sans: "*.{{ ansible_nas_domain }}"
+          traefik.http.services.invidious.loadbalancer.server.port: "3000"
+        healthcheck:
+          test: wget -nv --tries=1 --spider http://127.0.0.1:3000/api/v1/trending || exit 1
+          interval: 30s
+          timeout: 5s
+          retries: 2
+      tags: molecule-idempotence-notest
+  when: invidious_enabled is true
+
+- name: Stop Invidious
+  block:
+    - name: Stop invidious postgres
+      community.docker.docker_container:
+        name: "{{ invidious_postgres_container_name }}"
+        state: absent
+
+    - name: Stop invidious sig helper
+      community.docker.docker_container:
+        name: "{{ invidious_sig_helper_container_name }}"
+        state: absent
+
+    - name: Stop invidious
+      community.docker.docker_container:
+        name: "{{ invidious_container_name }}"
+        state: absent
+  when: invidious_enabled is false

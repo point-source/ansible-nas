@@ -1,0 +1,54 @@
+---
+- name: Verify
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Include vars
+      ansible.builtin.include_vars:
+        file: ../../defaults/main.yml
+
+    - name: Try and stop and remove Netbox Postgres
+      community.docker.docker_container:
+        name: "{{ netbox_postgres_container_name }}"
+        state: absent
+      register: result_postgres
+
+    - name: Try and stop and remove Netbox Redis
+      community.docker.docker_container:
+        name: "{{ netbox_redis_container_name }}"
+        state: absent
+      register: result_redis
+
+    - name: Try and stop and remove Netbox Redis Cache
+      community.docker.docker_container:
+        name: "{{ netbox_redis_cache_container_name }}"
+        state: absent
+      register: result_redis_cache
+
+    - name: Try and stop and remove Netbox
+      community.docker.docker_container:
+        name: "{{ netbox_container_name }}"
+        state: absent
+      register: result_netbox
+
+    - name: Try and stop and remove Netbox Worker
+      community.docker.docker_container:
+        name: "{{ netbox_worker_container_name }}"
+        state: absent
+      register: result_worker
+
+    - name: Try and stop and remove Netbox Housekeeping
+      community.docker.docker_container:
+        name: "{{ netbox_housekeeping_container_name }}"
+        state: absent
+      register: result_housekeeping
+
+    - name: Check if netbox containers are stopped
+      ansible.builtin.assert:
+        that:
+          - not result_postgres.changed
+          - not result_redis.changed
+          - not result_redis_cache.changed
+          - not result_netbox.changed
+          - not result_worker.changed
+          - not result_housekeeping.changed

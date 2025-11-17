@@ -11,6 +11,9 @@ roles/geerlingguy.nfs
 website/.docusaurus
 website/node_modules
 
+# MacOS
+.DS_Store
+
 # Vim
 [._]sw[a-p]
 
@@ -19,3 +22,20 @@ Session.vim
 
 # IntelliJ
 /.idea/
+
+# VSCodium
+*.code-workspace
+
+*.lock
+
+# Devenv
+.devenv*
+devenv.local.nix
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
+
+.ansible/

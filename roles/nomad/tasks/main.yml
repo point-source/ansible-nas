@@ -1,4 +1,7 @@
 ---
+- name: Get the list of services
+  ansible.builtin.service_facts:
+
 - name: Install and start Nomad
   block:
     - name: Add Hashicorp GPG key
@@ -32,7 +35,7 @@
         enabled: yes
   when: nomad_enabled is true
 
-- name: Stop Nomad
+- name: Stop and uninstall Nomad
   block:
     - name: Check if Nomad is installed
       ansible.builtin.stat:
